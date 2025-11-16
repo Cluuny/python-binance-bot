@@ -1,0 +1,12 @@
+{
+  "strategy_configs": {
+    "slow_ema": 21,
+    "fast_ema": 9
+  },
+  "symbol": "BTCUSDT",
+  "timeframe": "1m",
+  "risk_per_trade": 0.01,
+  "max_concurrent_trades": 3,
+  "stop_loss_pct": 0.02,
+  "take_profit_pct": 0.04
+}
