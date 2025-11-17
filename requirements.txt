@@ -1,4 +1,6 @@
+numpy
 python-dotenv
 ta
 pandas
 python-binance
+colorama
