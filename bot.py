@@ -11,12 +11,15 @@ import time
 
 from config import Config
 
+from logger import setup_logging
 import logging
 
 
 class Bot:
     def __init__(self):
+        setup_logging()
         self.logger = logging.getLogger("Bot")
+
 
         self.config = Config()
         self.client = Client(self.config.api_key, self.config.api_secret, testnet=True)
@@ -26,6 +29,7 @@ class Bot:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 10
 
+        self.symbol = self.config.data['symbol'].iloc[0]
         self.atr_period = self.config.data['atr_period'].iloc[0]
         self.atr_multiplier_sl = self.config.data['atr_multiplier_sl'].iloc[0]
         self.atr_multiplier_tp = self.config.data['atr_multiplier_tp'].iloc[0]
@@ -42,22 +46,22 @@ class Bot:
                 if kline['x']:  # x = is_closed
                     self.process_closed_kline(kline)
         except Exception as e:
-            logging.error(f"Error procesando mensaje: {e}")
+            self.logger.error(f"Error procesando mensaje: {e}")
 
     def handle_websocket_error(self, error):
         """Manejar errores del websocket"""
-        logging.error(f"WebSocket error: {error}")
+        self.logger.error(f"WebSocket error: {error}")
         self.ws_connected = False
         self.reconnect_websocket()
 
     def reconnect_websocket(self):
         """Reconectar el websocket automáticamente"""
         if self.reconnect_attempts >= self.max_reconnect_attempts:
-            logging.warning("Máximo de intentos de reconexión alcanzado")
+            self.logger.warning("Máximo de intentos de reconexión alcanzado")
             return
 
         self.reconnect_attempts += 1
-        logging.info(f"Intentando reconexión #{self.reconnect_attempts}...")
+        self.logger.info(f"Intentando reconexión #{self.reconnect_attempts}...")
 
         try:
             # Detener conexión existente
@@ -70,10 +74,10 @@ class Bot:
             self.start_websocket()
 
         except Exception as e:
-            logging.error(f"Error en reconexión: {e}")
+            self.logger.error(f"Error en reconexión: {e}")
             # Reintentar después de un tiempo exponencial
             wait_time = min(60 * self.reconnect_attempts, 300)  # Máximo 5 minutos
-            logging.warning(f"Esperando {wait_time} segundos antes del próximo intento...")
+            self.logger.warning(f"Esperando {wait_time} segundos antes del próximo intento...")
             time.sleep(wait_time)
             self.reconnect_websocket()
 
@@ -88,10 +92,10 @@ class Bot:
             )
             self.ws_connected = True
             self.reconnect_attempts = 0
-            logging.info("WebSocket conectado exitosamente")
+            self.logger.info("WebSocket conectado exitosamente")
 
         except Exception as e:
-            logging.error(f"Error iniciando WebSocket: {e}")
+            self.logger.error(f"Error iniciando WebSocket: {e}")
             self.ws_connected = False
             self.reconnect_websocket()
 
@@ -116,11 +120,11 @@ class Bot:
                 df['low'] = pd.to_numeric(df['low'])
                 df['close'] = pd.to_numeric(df['close'])
                 self.kline_data = df
-                logging.info(f"Datos históricos obtenidos: {len(df)} velas")
+                self.logger.info(f"Datos históricos obtenidos: {len(df)} velas")
                 break
 
             except Exception as e:
-                logging.error(f"Error obteniendo datos históricos (intento {attempt + 1}/{max_retries}): {e}")
+                self.logger.error(f"Error obteniendo datos históricos (intento {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(5)
                 else:
@@ -134,7 +138,7 @@ class Bot:
         while True:
             try:
                 if not self.ws_connected:
-                    logging.error("Conexión WebSocket perdida, intentando reconectar...")
+                    self.logger.error("Conexión WebSocket perdida, intentando reconectar...")
                     self.reconnect_websocket()
 
                 # Verificar condiciones de salida si hay posición abierta
@@ -144,7 +148,7 @@ class Bot:
                 time.sleep(60)  # Verificar cada minuto
 
             except Exception as e:
-                logging.error(f"Error en get_live_data: {e}")
+                self.logger.error(f"Error en get_live_data: {e}")
                 time.sleep(60)
 
     def process_closed_kline(self, kline):
@@ -162,7 +166,7 @@ class Bot:
                 'num_trades': kline['n']
             }
 
-            logging.info(f"Nueva vela: {new_data['close']:.2f} - {new_data['time']}")
+            self.logger.info(f"Nueva vela: {self.symbol} - {new_data['close']:.2f} - {new_data['time']}")
 
             # Actualizar DataFrame
             new_row = pd.DataFrame([new_data])
@@ -178,13 +182,13 @@ class Bot:
             # Verificar señal
             signal = self.check_signal()
             if signal:
-                logging.info(f"SEÑAL: {signal}")
+                self.logger.info(f"SEÑAL: {signal}")
                 self.execute_trade(signal)
 
             # Verificar condiciones de salida
             self.check_exit_conditions()
         except Exception as e:
-            logging.error(f"Error en process_closed_kline: {e}")
+            self.logger.error(f"Error en process_closed_kline: {e}")
 
     def calculate_indicators(self):
         """Calcular todos los indicadores técnicos"""
@@ -202,7 +206,7 @@ class Bot:
             self.calculate_atr()
 
         except Exception as e:
-            logging.error(f"Error calculando indicadores: {e}")
+            self.logger.error(f"Error calculando indicadores: {e}")
 
     def calculate_atr(self):
         """Calcular ATR - versión mejorada"""
@@ -222,14 +226,13 @@ class Bot:
 
             if atr_ratio < 0.01:  # Menos del 1% - probablemente correcto
                 self.kline_data['atr'] = atr_ta
-                logging.info(f"ATR (ta): {atr_ta.iloc[-1]:.2f}")
             else:
                 # Si es muy alto, usar cálculo manual
-                logging.warning(f"ATR de ta muy alto ({atr_ta.iloc[-1]:.2f}), usando cálculo manual")
+                self.logger.warning(f"ATR de ta muy alto ({atr_ta.iloc[-1]:.2f}), usando cálculo manual")
                 self.calculate_atr_manual()
 
         except Exception as e:
-            logging.error(f"Error con ATR de ta, usando manual: {e}")
+            self.logger.error(f"Error con ATR de ta, usando manual: {e}")
             self.calculate_atr_manual()
 
     def calculate_atr_manual(self):
@@ -266,17 +269,17 @@ class Bot:
             # Los primeros atr_period-1 valores serán NaN
             self.kline_data['atr'] = pd.Series([np.nan] * (self.atr_period) + atr_values)
 
-            logging.info(f"ATR manual calculado: {self.kline_data['atr'].iloc[-1]:.2f}")
+            self.logger.info(f"ATR manual calculado: {self.kline_data['atr'].iloc[-1]:.2f}")
 
         except Exception as e:
-            logging.error(f"Error calculando ATR manual: {e}")
+            self.logger.error(f"Error calculando ATR manual: {e}")
 
     def debug_atr_detailed(self):
         """Debug detallado del ATR"""
-        logging.info("DEBUG DETALLADO ATR:")
+        self.logger.info("DEBUG DETALLADO ATR:")
 
         # Verificar las primeras velas del histórico
-        logging.info("Primeras 5 velas del dataset:")
+        self.logger.info("Primeras 5 velas del dataset:")
         for i in range(min(5, len(self.kline_data))):
             print(f"  Vela {i}: H={self.kline_data['high'].iloc[i]:.2f}, "
                   f"L={self.kline_data['low'].iloc[i]:.2f}, "
@@ -285,7 +288,7 @@ class Bot:
         # Verificar si hay datos anómalos
         high_low_diff = self.kline_data['high'] - self.kline_data['low']
         max_diff = high_low_diff.max()
-        logging.info(f"Mayor diferencia High-Low en dataset: {max_diff:.2f}")
+        self.logger.info(f"Mayor diferencia High-Low en dataset: {max_diff:.2f}")
 
         if max_diff > 1000:  # Si hay diferencias > $1000, es anómalo
             outlier_index = high_low_diff.idxmax()
@@ -299,7 +302,7 @@ class Bot:
         """Verificar señales de trading con debugging mejorado"""
         # Verificar que hay suficientes datos para comparar
         if len(self.kline_data) < 2:
-            logging.warning("No hay suficientes datos para verificar señal")
+            self.logger.warning("No hay suficientes datos para verificar señal")
             return None
 
         # Verificar que las EMAs no sean NaN
@@ -307,7 +310,7 @@ class Bot:
                 pd.isna(self.kline_data['slow_ema'].iloc[-1]) or
                 pd.isna(self.kline_data['fast_ema'].iloc[-2]) or
                 pd.isna(self.kline_data['slow_ema'].iloc[-2])):
-            logging.warning("EMAs contienen valores NaN")
+            self.logger.warning("EMAs contienen valores NaN")
             return None
 
         last = self.kline_data.iloc[-1]
@@ -321,17 +324,17 @@ class Bot:
         # CRUCE ALCISTA: EMA rápida cruza POR ENCIMA de la lenta → COMPRA
         if (prev['fast_ema'] <= prev['slow_ema'] and
                 last['fast_ema'] > last['slow_ema']):
-            logging.info(f"   SEÑAL DE COMPRA DETECTADA")
-            logging.info(f"   Anterior: Fast({prev['fast_ema']:.5f}) <= Slow({prev['slow_ema']:.5f})")
-            logging.info(f"   Actual: Fast({last['fast_ema']:.5f}) > Slow({last['slow_ema']:.5f})")
+            self.logger.info(f"   SEÑAL DE COMPRA DETECTADA")
+            self.logger.info(f"   Anterior: Fast({prev['fast_ema']:.5f}) <= Slow({prev['slow_ema']:.5f})")
+            self.logger.info(f"   Actual: Fast({last['fast_ema']:.5f}) > Slow({last['slow_ema']:.5f})")
             return 'BUY'
 
         # CRUCE BAJISTA: EMA rápida cruza POR DEBAJO de la lenta → VENTA
         elif (prev['fast_ema'] >= prev['slow_ema'] and
               last['fast_ema'] < last['slow_ema']):
-            logging.info(f"   SEÑAL DE VENTA DETECTADA")
-            logging.info(f"   Anterior: Fast({prev['fast_ema']:.5f}) >= Slow({prev['slow_ema']:.5f})")
-            logging.info(f"   Actual: Fast({last['fast_ema']:.5f}) < Slow({last['slow_ema']:.5f})")
+            self.logger.info(f"   SEÑAL DE VENTA DETECTADA")
+            self.logger.info(f"   Anterior: Fast({prev['fast_ema']:.5f}) >= Slow({prev['slow_ema']:.5f})")
+            self.logger.info(f"   Actual: Fast({last['fast_ema']:.5f}) < Slow({last['slow_ema']:.5f})")
             return 'SELL'
 
         return None
@@ -358,8 +361,8 @@ class Bot:
             available_balance = float(balance_info['free'])
             quantity = available_balance * percentage
 
-            logging.info(f"Balance disponible de {symbol_from}: {available_balance}")
-            logging.info(f"Porcentaje a usar: {percentage * 100}% = {quantity} {symbol_from}")
+            self.logger.info(f"Balance disponible de {symbol_from}: {available_balance}")
+            self.logger.info(f"Porcentaje a usar: {percentage * 100}% = {quantity} {symbol_from}")
 
             # Si la cantidad es 0 o muy pequeña
             if quantity <= 0:
@@ -374,7 +377,7 @@ class Bot:
             return quantity / float(symbol_to_price)
 
         except Exception as e:
-            logging.error(f"Error en conversión: {traceback.format_exc()}")
+            self.logger.error(f"Error en conversión: {traceback.format_exc()}")
             return None
 
     def execute_trade(self, signal):
@@ -408,14 +411,14 @@ class Bot:
                 stopLimitTimeInForce=TIME_IN_FORCE_GTC
             )
 
-            logging.info(f"   ENTRADA COMPRA:")
-            logging.info(f"   Precio: {current_price:.2f}")
-            logging.info(f"   Stop Loss: {self.stop_loss:.2f}")
-            logging.info(f"   Take Profit: {self.take_profit:.2f}")
-            logging.info(f"   ATR: {current_atr:.2f}")
-            logging.info(f"   Risk: {current_price - self.stop_loss:.2f}")
-            logging.info(f"   Reward: {self.take_profit - current_price:.2f}")
-            logging.info(f"   Ratio R:R: {(self.take_profit - current_price) / (current_price - self.stop_loss):.1f}:1")
+            self.logger.info(f"   ENTRADA COMPRA:")
+            self.logger.info(f"   Precio: {current_price:.2f}")
+            self.logger.info(f"   Stop Loss: {self.stop_loss:.2f}")
+            self.logger.info(f"   Take Profit: {self.take_profit:.2f}")
+            self.logger.info(f"   ATR: {current_atr:.2f}")
+            self.logger.info(f"   Risk: {current_price - self.stop_loss:.2f}")
+            self.logger.info(f"   Reward: {self.take_profit - current_price:.2f}")
+            self.logger.info(f"   Ratio R:R: {(self.take_profit - current_price) / (current_price - self.stop_loss):.1f}:1")
 
         elif signal == 'SELL' and self.current_position != 'SELL':
             self.current_position = 'SELL'
@@ -423,14 +426,14 @@ class Bot:
             self.stop_loss = current_price + (current_atr * self.atr_multiplier_sl)
             self.take_profit = current_price - (current_atr * self.atr_multiplier_tp)
 
-            logging.info(f"   ENTRADA VENTA:")
-            logging.info(f"   Precio: {current_price:.2f}")
-            logging.info(f"   Stop Loss: {self.stop_loss:.2f}")
-            logging.info(f"   Take Profit: {self.take_profit:.2f}")
-            logging.info(f"   ATR: {current_atr:.2f}")
-            logging.info(f"   Risk: {self.stop_loss - current_price:.2f}")
-            logging.info(f"   Reward: {current_price - self.take_profit:.2f}")
-            logging.info(f"   Ratio R:R: {(current_price - self.take_profit) / (self.stop_loss - current_price):.1f}:1")
+            self.logger.info(f"   ENTRADA VENTA:")
+            self.logger.info(f"   Precio: {current_price:.2f}")
+            self.logger.info(f"   Stop Loss: {self.stop_loss:.2f}")
+            self.logger.info(f"   Take Profit: {self.take_profit:.2f}")
+            self.logger.info(f"   ATR: {current_atr:.2f}")
+            self.logger.info(f"   Risk: {self.stop_loss - current_price:.2f}")
+            self.logger.info(f"   Reward: {current_price - self.take_profit:.2f}")
+            self.logger.info(f"   Ratio R:R: {(current_price - self.take_profit) / (self.stop_loss - current_price):.1f}:1")
 
     def check_exit_conditions(self):
         """Verificar si debemos cerrar la posición por SL o TP"""
@@ -441,13 +444,13 @@ class Bot:
 
         if self.current_position == 'BUY':
             if current_price <= self.stop_loss:
-                logging.info(f"STOP LOSS COMPRA - Precio: {current_price:.2f}")
+                self.logger.info(f"STOP LOSS COMPRA - Precio: {current_price:.2f}")
                 self.current_position = None
                 self.entry_price = None
                 self.stop_loss = None
                 self.take_profit = None
             elif current_price >= self.take_profit:
-                logging.info(f"TAKE PROFIT COMPRA - Precio: {current_price:.2f}")
+                self.logger.info(f"TAKE PROFIT COMPRA - Precio: {current_price:.2f}")
                 self.current_position = None
                 self.entry_price = None
                 self.stop_loss = None
@@ -455,13 +458,13 @@ class Bot:
 
         elif self.current_position == 'SELL':
             if current_price >= self.stop_loss:
-                logging.info(f"STOP LOSS VENTA - Precio: {current_price:.2f}")
+                self.logger.info(f"STOP LOSS VENTA - Precio: {current_price:.2f}")
                 self.current_position = None
                 self.entry_price = None
                 self.stop_loss = None
                 self.take_profit = None
             elif current_price <= self.take_profit:
-                logging.info(f"TAKE PROFIT VENTA - Precio: {current_price:.2f}")
+                self.logger.info(f"TAKE PROFIT VENTA - Precio: {current_price:.2f}")
                 self.current_position = None
                 self.entry_price = None
                 self.stop_loss = None
@@ -473,18 +476,18 @@ class Bot:
             # Obtener información de la cuenta
             account_info = self.client.get_account()
 
-            logging.info("SALDO PRINCIPAL TESTNET:")
+            self.logger.info("SALDO PRINCIPAL TESTNET:")
             for balance in account_info['balances']:
                 if float(balance['free']) > 0 or float(balance['locked']) > 0:
                     if balance['asset'] == 'BTC' or balance['asset'] == 'USDT' or balance['asset'] == 'ETH' or balance['asset'] == 'BNB':
-                        logging.info(f"   {balance['asset']}: Libre: {balance['free']} | Bloqueado: {balance['locked']}")
+                        self.logger.info(f"   {balance['asset']}: Libre: {balance['free']} | Bloqueado: {balance['locked']}")
 
         except Exception as e:
-            logging.error(f"Error consultando saldo: {e}")
+            self.logger.error(f"Error consultando saldo: {e}")
 
     def start(self):
         """Iniciar el bot con manejo robusto de errores"""
-        logging.info("Iniciando bot...")
+        self.logger.info("Iniciando bot...")
 
         try:
             # Verificar saldo en testnet
@@ -503,9 +506,9 @@ class Bot:
             self.get_live_data()
 
         except KeyboardInterrupt:
-            logging.error("Bot detenido por el usuario")
+            self.logger.error("Bot detenido por el usuario")
         except Exception as e:
-            logging.error(f"Error crítico en el bot: {e}")
-            logging.error("Reiniciando en 60 segundos...")
+            self.logger.error(f"Error crítico en el bot: {e}")
+            self.logger.error("Reiniciando en 60 segundos...")
             time.sleep(5)
             self.start()

@@ -8,7 +8,6 @@ if __name__ == "__main__":
     setup_logging()
 
     logger = logging.getLogger("Main")
-    logger.info("Iniciando bot")
     config = Config()
     bot = Bot()
     bot.start()
