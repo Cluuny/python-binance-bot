@@ -1,7 +1,10 @@
 {
   "strategy_configs": {
     "slow_ema": 21,
-    "fast_ema": 9
+    "fast_ema": 9,
+    "atr_period": 14,
+    "atr_multiplier_sl": 1.5,
+    "atr_multiplier_tp": 2.0
   },
   "symbol": "BTCUSDT",
   "timeframe": "1m",
